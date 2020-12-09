@@ -13,13 +13,14 @@ Conventions:
     W - size of each memory slot i.e word size
 """
 
-from collections import namedtuple, OrderedDict
 import tensorflow as tf
+import gin.tf
+
 from tensorflow.python.util import nest
+from collections import namedtuple, OrderedDict
+from memory import Memory, EPSILON
 
-from .memory import Memory, EPSILON
-
-
+@gin.configurable
 class DNC(tf.keras.layers.Layer):
     """DNC recurrent module that connects together the controller and memory.
 
@@ -71,8 +72,9 @@ class DNC(tf.keras.layers.Layer):
             name='controller_to_interface'
         )
         self._memory = Memory(memory_size, word_size, num_read_heads)
-        self._final_output_dense = tf.keras.layers.Dense(self._output_size)
+        self._final_output_dense = tf.keras.layers.Dense(self._output_size,name="final_dense")
 
+    @tf.function
     def _parse_interface_vector(self, interface_vector):
         r, w = self._R, self._W
 
@@ -94,7 +96,7 @@ class DNC(tf.keras.layers.Layer):
         interface = {name: fn(interface_vector[:, i[0]:i[1]]) for name, fn, i in zipped_items}
 
         return DNC.interface(**interface)
-
+    @tf.function
     def _flatten_read_vectors(self, x):
         return tf.reshape(x, (-1, self._W * self._R))
 
@@ -102,7 +104,7 @@ class DNC(tf.keras.layers.Layer):
         prev_dnc_state = nest.pack_sequence_as(self.state_size_nested, prev_dnc_state)
         with tf.name_scope("inputs_to_controller"):
             read_vectors_flat = self._flatten_read_vectors(prev_dnc_state.read_vectors)
-            input_augmented = tf.concat([inputs, read_vectors_flat], 1)
+            input_augmented = tf.concat([inputs, read_vectors_flat], 1, name = "ConcatInput")
             controller_output, controller_state = self._controller(
                 input_augmented,
                 prev_dnc_state.controller_state,
@@ -123,7 +125,7 @@ class DNC(tf.keras.layers.Layer):
 
         with tf.name_scope("join_outputs"):
             read_vectors_flat = self._flatten_read_vectors(read_vectors)
-            final_output = tf.concat([controller_output, read_vectors_flat], 1)
+            final_output = tf.concat([controller_output, read_vectors_flat], 1,name = "join_outputs")
             final_output = self._final_output_dense(final_output)
             final_output = tf.clip_by_value(final_output, -self._clip, self._clip)
 
